@@ -70,18 +70,7 @@ Right-click `index.html` in VS Code and choose **"Open with Live Server"**.
 
 ---
 
-## 🌐 Deployment
 
-Deploy to any static hosting service for free in seconds:
-
-### GitHub Pages
-1. Push the repository to GitHub.
-2. Go to **Settings > Pages**.
-3. Under **Build and deployment > Source**, select `Deploy from a branch` and choose `main` / `/ (root)`.
-4. Your app will be live at `https://<your-username>.github.io/<repo-name>/`.
-
-### Vercel / Netlify / Cloudflare Pages
-Simply import the repository. No build command is required (`Publish directory: .`).
 
 ---
 
