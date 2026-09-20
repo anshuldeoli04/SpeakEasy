@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SpeakEasy — Real-Time English Conversation Practice</title>
+  <meta name="description" content="SpeakEasy helps you overcome speaking anxiety and practice fluent English with Alex, your encouraging AI partner.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com; img-src 'self' data:; media-src 'self';">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" x2="12" y1="19" y2="22"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">SpeakEasy</h1>
+          <span class="brand-subtitle">English Practice with Alex</span>
+        </div>
+      </div>
+
+      <!-- Live Session Tracker Bar -->
+      <div id="live-tracker-bar" class="live-tracker-bar" title="Current session metrics">
+        <div class="tracker-item">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span id="tracker-time">0:00</span>
+        </div>
+        <span class="tracker-sep">•</span>
+        <div class="tracker-item">
+          <span id="tracker-turns">0</span>&nbsp;turns
+        </div>
+        <span class="tracker-sep">•</span>
+        <div class="tracker-item">
+          <span id="tracker-words">0</span>&nbsp;words
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Get Feedback / Report Button -->
+        <button id="report-open-btn" class="btn btn-sm btn-report" title="Analyze conversation and get full performance report" aria-label="Feedback Report">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4"/>
+            <path d="M7 10h10"/>
+            <path d="M7 14h6"/>
+            <circle cx="17.5" cy="6.5" r="2.5"/>
+          </svg>
+          <span class="btn-text">Feedback</span>
+        </button>
+
+        <button id="history-open-btn" class="icon-btn" title="Past Reports History" aria-label="Past Reports History">
+          <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v5h5"/>
+            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/>
+            <path d="M12 7v5l4 2"/>
+          </svg>
+        </button>
+
+        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme" aria-label="Toggle Theme">
+          <svg id="theme-icon-dark" class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          </svg>
+          <svg id="theme-icon-light" class="icon hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2"/>
+            <path d="M12 20v2"/>
+            <path d="m4.93 4.93 1.41 1.41"/>
+            <path d="m17.66 17.66 1.41 1.41"/>
+            <path d="M2 12h2"/>
+            <path d="M20 12h2"/>
+            <path d="m6.34 17.66-1.41 1.41"/>
+            <path d="m19.07 4.93-1.41 1.41"/>
+          </svg>
+        </button>
+
+        <button id="settings-open-btn" class="icon-btn" title="Settings" aria-label="Open Settings">
+          <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Browser Compatibility Warning (if needed) -->
+    <div id="browser-warning" class="alert-banner warning hidden">
+      <div class="alert-content">
+        <strong>Browser Notice:</strong> Speech recognition is not fully supported in this browser. For hands-free voice conversation, we recommend opening SpeakEasy in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong>.
+      </div>
+      <button class="alert-close" id="dismiss-browser-warning" aria-label="Dismiss">&times;</button>
+    </div>
+
+    <!-- API Key Notice Banner -->
+    <div id="apikey-banner" class="alert-banner info hidden">
+      <div class="alert-content">
+        <span>✨ <strong>Welcome!</strong> Enter your free Gemini API key to start speaking with Alex.</span>
+      </div>
+      <div class="alert-actions">
+        <button id="banner-settings-btn" class="btn btn-sm btn-primary">Enter Key</button>
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="link-btn">Get Free Key &rarr;</a>
+      </div>
+    </div>
+
+    <!-- Conversation Transcript -->
+    <main class="transcript-viewport" id="transcript-viewport">
+      <div class="transcript-container" id="transcript-container">
+        <!-- Empty State Starter -->
+        <div id="welcome-card" class="welcome-card">
+          <div class="welcome-avatar">
+            <span class="avatar-emoji">🌱</span>
+          </div>
+          <h2 class="welcome-title">Welcome to SpeakEasy!</h2>
+          <p class="welcome-text">
+            Meet <strong>Alex</strong>, your encouraging partner for low-pressure English practice. No tests, no pressure — just natural, friendly conversation.
+          </p>
+          <div class="starters-section">
+            <span class="starters-label">Try starting with:</span>
+            <div class="starters-grid">
+              <button class="starter-chip" data-text="Hi Alex! How's your day going?">"How's your day going?"</button>
+              <button class="starter-chip" data-text="I'd love to talk about movies today.">"Talk about movies"</button>
+              <button class="starter-chip" data-text="Can we practice ordering food at a cafe?">"Ordering at a cafe"</button>
+              <button class="starter-chip" data-text="I want to practice talking about my hobbies.">"My favorite hobbies"</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat messages will be rendered here dynamically -->
+      </div>
+      
+      <!-- Scroll to bottom button (appears when scrolled up) -->
+      <button id="scroll-bottom-btn" class="scroll-bottom-btn hidden" title="Scroll to bottom" aria-label="Scroll to bottom">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m6 9 6 6 6-6"/>
+        </svg>
+      </button>
+    </main>
+
+    <!-- Voice Control Center -->
+    <section class="voice-center" aria-label="Voice Controls">
+      <!-- Status Badge -->
+      <div class="status-indicator-container">
+        <div id="status-badge" class="status-badge status-idle">
+          <span class="status-dot"></span>
+          <span id="status-text" class="status-text">Tap to speak</span>
+        </div>
+        <div id="interim-preview" class="interim-preview hidden"></div>
+      </div>
+
+      <!-- Main Mic Action -->
+      <div class="mic-button-wrapper">
+        <div class="mic-pulse-ring ring-1"></div>
+        <div class="mic-pulse-ring ring-2"></div>
+        <div class="mic-pulse-ring ring-3"></div>
+
+        <button id="mic-btn" class="mic-btn" aria-label="Toggle Microphone" title="Tap to start speaking">
+          <!-- Idle Mic Icon -->
+          <svg id="mic-icon-idle" class="mic-svg" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" x2="12" y1="19" y2="22"/>
+          </svg>
+          <!-- Listening Waveform Icon -->
+          <div id="mic-icon-listening" class="sound-wave hidden">
+            <span class="bar bar-1"></span>
+            <span class="bar bar-2"></span>
+            <span class="bar bar-3"></span>
+            <span class="bar bar-4"></span>
+          </div>
+          <!-- Thinking Spinner -->
+          <div id="mic-icon-thinking" class="thinking-spinner hidden"></div>
+          <!-- Speaking Stop Icon -->
+          <svg id="mic-icon-speaking" class="mic-svg hidden" width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Quick Interruption / Stop Action Button -->
+      <button id="stop-action-btn" class="stop-action-btn hidden" title="Stop speech">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="5" y="5" width="14" height="14" rx="2"/>
+        </svg>
+        <span>Stop</span>
+      </button>
+    </section>
+
+    <!-- Fallback Text Input Bar -->
+    <footer class="app-footer">
+      <form id="text-input-form" class="text-input-form" autocomplete="off">
+        <input 
+          type="text" 
+          id="text-input" 
+          class="text-input" 
+          placeholder="Or type a message here..." 
+          aria-label="Message text"
+          maxlength="1000"
+        />
+        <button type="submit" id="send-btn" class="send-btn" title="Send message" aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </form>
+    </footer>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          <h2 id="settings-title" class="modal-title">Settings</h2>
+        </div>
+        <button id="settings-close-btn" class="modal-close-btn" aria-label="Close settings">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Gemini API Key Section -->
+        <div class="settings-group">
+          <label class="settings-label" for="api-key-input">
+            Google Gemini API Key
+          </label>
+          <p class="settings-help">
+            Used directly by your browser with Gemini 2.5 Flash. Stored safely in localStorage.
+          </p>
+          <div class="input-with-action">
+            <input 
+              type="password" 
+              id="api-key-input" 
+              class="settings-input" 
+              placeholder="Paste AI Studio API key here" 
+              autocomplete="off" 
+              spellcheck="false"
+            />
+            <button type="button" id="toggle-key-visibility-btn" class="input-addon-btn" title="Show/Hide Key">
+              👁️
+            </button>
+          </div>
+          <div class="key-status-row">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="link-small">
+              Get free Gemini key at Google AI Studio &rarr;
+            </a>
+            <span id="api-key-saved-indicator" class="saved-badge hidden">Saved ✓</span>
+          </div>
+        </div>
+
+        <hr class="settings-divider">
+
+        <!-- Voice Selection -->
+        <div class="settings-group">
+          <label class="settings-label" for="voice-select">
+            Alex's Voice (Speech Synthesis)
+          </label>
+          <p class="settings-help">
+            Select a natural-sounding English voice provided by your browser or operating system.
+          </p>
+          <select id="voice-select" class="settings-select">
+            <option value="">Default English Voice</option>
+          </select>
+          <div class="voice-test-row">
+            <button type="button" id="test-voice-btn" class="btn btn-sm btn-secondary">
+              🔊 Test Voice
+            </button>
+          </div>
+        </div>
+
+        <!-- Speech Rate -->
+        <div class="settings-group">
+          <div class="label-with-value">
+            <label class="settings-label" for="rate-slider">Speech Rate</label>
+            <span id="rate-value" class="rate-value">1.0x</span>
+          </div>
+          <p class="settings-help">
+            Adjust Alex's speaking speed (slower is great for beginners).
+          </p>
+          <div class="slider-row">
+            <span class="slider-min">0.5x</span>
+            <input 
+              type="range" 
+              id="rate-slider" 
+              class="settings-slider" 
+              min="0.5" 
+              max="1.5" 
+              step="0.05" 
+              value="1.0"
+            />
+            <span class="slider-max">1.5x</span>
+          </div>
+        </div>
+
+        <hr class="settings-divider">
+
+        <!-- Auto-Listen Toggle -->
+        <div class="settings-group">
+          <div class="toggle-row">
+            <div>
+              <label class="settings-label cursor-pointer" for="autolisten-toggle">Auto-listen after Alex speaks</label>
+              <p class="settings-help">Automatically activates your microphone once Alex finishes speaking for continuous back-and-forth practice.</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="autolisten-toggle" checked>
+              <span class="slider round"></span>
+            </label>
+          </div>
+        </div>
+
+        <hr class="settings-divider">
+
+        <!-- Reset Conversation -->
+        <div class="settings-group danger-group">
+          <label class="settings-label">Conversation Management</label>
+          <p class="settings-help">Clear current chat transcript and reset Alex's memory for a fresh session.</p>
+          <button id="clear-chat-btn" class="btn btn-danger">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18"/>
+              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+            </svg>
+            Clear Conversation
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="settings-save-btn" class="btn btn-primary w-full">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Performance & Feedback Report Modal -->
+  <div id="report-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <div class="modal-card report-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="report-header-icon">📊</div>
+          <div>
+            <h2 id="report-title" class="modal-title">Performance & Feedback Report</h2>
+            <span id="report-date" class="report-date-subtitle">Session Analysis</span>
+          </div>
+        </div>
+        <button id="report-close-btn" class="modal-close-btn" aria-label="Close report">&times;</button>
+      </div>
+
+      <div class="modal-body report-modal-body">
+        <!-- Loading State -->
+        <div id="report-loading" class="report-loading hidden">
+          <div class="report-loading-spinner"></div>
+          <h3>Analyzing Conversation...</h3>
+          <p>Evaluating grammar, sentence structure, pronunciation clues, and fluency metrics.</p>
+        </div>
+
+        <!-- Loaded Report Content -->
+        <div id="report-content" class="report-content">
+          <!-- Overview Hero Banner -->
+          <div class="report-hero-banner">
+            <div class="hero-left">
+              <div class="cefr-badge-container">
+                <span class="cefr-label">Estimated CEFR Level</span>
+                <span id="report-cefr-badge" class="cefr-badge">B1 - Intermediate</span>
+              </div>
+              <div class="hero-scores-row">
+                <div class="score-card main-score">
+                  <span class="score-number" id="report-overall-score">78</span>
+                  <span class="score-label">Overall Score</span>
+                </div>
+                <div class="score-subgrid">
+                  <div class="score-mini">
+                    <span class="score-mini-val" id="report-fluency-score">75</span>
+                    <span class="score-mini-label">Fluency</span>
+                  </div>
+                  <div class="score-mini">
+                    <span class="score-mini-val" id="report-grammar-score">80</span>
+                    <span class="score-mini-label">Grammar</span>
+                  </div>
+                  <div class="score-mini">
+                    <span class="score-mini-val" id="report-vocab-score">78</span>
+                    <span class="score-mini-label">Vocabulary</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Session Stats Strip -->
+            <div class="session-stats-strip">
+              <div class="stat-pill">
+                <span class="stat-pill-label">Duration</span>
+                <strong id="rep-stat-time">0:00</strong>
+              </div>
+              <div class="stat-pill">
+                <span class="stat-pill-label">Turns</span>
+                <strong id="rep-stat-turns">0</strong>
+              </div>
+              <div class="stat-pill">
+                <span class="stat-pill-label">Words Spoken</span>
+                <strong id="rep-stat-words">0</strong>
+              </div>
+              <div class="stat-pill">
+                <span class="stat-pill-label">Avg Words / Turn</span>
+                <strong id="rep-stat-avg">0.0</strong>
+              </div>
+            </div>
+
+            <!-- Summary Description -->
+            <div class="report-summary-box">
+              <p id="report-summary-text">Great effort in your practice session! You kept the dialogue moving with clear intent.</p>
+            </div>
+          </div>
+
+          <!-- Report Tabs Navigation -->
+          <div class="report-tabs">
+            <button class="report-tab-btn active" data-tab="grammar">
+              <span>✍️</span> Grammar & Sentences
+            </button>
+            <button class="report-tab-btn" data-tab="pronunciation">
+              <span>🗣️</span> Pronunciation & Clarity
+            </button>
+            <button class="report-tab-btn" data-tab="fluency">
+              <span>📈</span> Fluency & Vocabulary
+            </button>
+            <button class="report-tab-btn" data-tab="action">
+              <span>🎯</span> Action Plan & Advice
+            </button>
+          </div>
+
+          <!-- Tab 1: Grammar & Sentences -->
+          <div id="tab-grammar" class="report-tab-panel active">
+            <div class="panel-section">
+              <h3 class="panel-section-title">
+                <span>Grammar Corrections</span>
+                <span id="grammar-badge-count" class="count-badge">0</span>
+              </h3>
+              <p class="panel-section-desc">Identified grammar errors with explanations and natural native alternatives.</p>
+              <div id="grammar-list" class="cards-list">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+
+            <div class="panel-section mt-4">
+              <h3 class="panel-section-title">
+                <span>Sentence Structure & Phrasing</span>
+                <span id="structure-badge-count" class="count-badge">0</span>
+              </h3>
+              <p class="panel-section-desc">Refinements to make your sentences flow like a native speaker.</p>
+              <div id="structure-list" class="cards-list">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 2: Pronunciation & Clarity -->
+          <div id="tab-pronunciation" class="report-tab-panel hidden">
+            <div class="panel-section">
+              <h3 class="panel-section-title">
+                <span>Pronunciation & Articulation Guidance</span>
+              </h3>
+              <p class="panel-section-desc">
+                Words with pronunciation traps, dropped endings, or speech-to-text sound ambiguities observed during your conversation.
+              </p>
+              <div id="pronunciation-list" class="cards-list">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 3: Fluency & Vocabulary -->
+          <div id="tab-fluency" class="report-tab-panel hidden">
+            <div class="panel-section">
+              <h3 class="panel-section-title">Speaking Pace & Filler Words</h3>
+              <div id="filler-analysis-box" class="insight-card">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+
+            <div class="panel-section mt-4">
+              <h3 class="panel-section-title">Vocabulary Diversity & Upgrades</h3>
+              <div id="vocab-feedback-box" class="insight-card">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+
+            <div class="panel-section mt-4">
+              <h3 class="panel-section-title">Conversational Flow & Momentum</h3>
+              <div id="flow-feedback-box" class="insight-card">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 4: Action Plan & Advice -->
+          <div id="tab-action" class="report-tab-panel hidden">
+            <div class="panel-section">
+              <h3 class="panel-section-title">
+                <span>🌟 What You Did Well (Strengths)</span>
+              </h3>
+              <div id="strengths-list" class="strengths-grid">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+
+            <div class="panel-section mt-4">
+              <h3 class="panel-section-title">
+                <span>🚀 Targeted Strategies & Daily Exercises</span>
+              </h3>
+              <p class="panel-section-desc">Practical drills to overcome your specific mistakes before your next conversation.</p>
+              <div id="action-plan-list" class="action-plan-grid">
+                <!-- Injected via JS -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer report-modal-footer">
+        <div class="footer-actions-left">
+          <button id="copy-report-btn" class="btn btn-secondary btn-sm" title="Copy report summary to clipboard">
+            📋 Copy Summary
+          </button>
+          <button id="download-report-btn" class="btn btn-secondary btn-sm" title="Download report as text">
+            📥 Export Report
+          </button>
+        </div>
+        <div class="footer-actions-right">
+          <button id="report-new-session-btn" class="btn btn-danger btn-sm" title="Clear conversation and start a new practice session">
+            🔄 New Session
+          </button>
+          <button id="report-done-btn" class="btn btn-primary btn-sm">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Past Reports History Modal -->
+  <div id="history-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="history-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v5h5"/>
+            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/>
+            <path d="M12 7v5l4 2"/>
+          </svg>
+          <h2 id="history-title" class="modal-title">Past Session Reports</h2>
+        </div>
+        <button id="history-close-btn" class="modal-close-btn" aria-label="Close history">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div id="history-list" class="history-list">
+          <!-- Injected via JS -->
+        </div>
+      </div>
+
+      <div class="modal-footer flex-between">
+        <button id="clear-history-btn" class="btn btn-danger btn-sm">Clear History</button>
+        <button id="history-done-btn" class="btn btn-primary btn-sm">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
