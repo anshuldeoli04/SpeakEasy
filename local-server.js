@@ -92,7 +92,7 @@ const server = http.createServer((req, res) => {
       'Content-Type': contentType,
       'Cache-Control': 'no-cache',
       // Content Security Policy: Whitelist only trusted Google Fonts and Gemini endpoints
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com; img-src 'self' data:; media-src 'self';",
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com; img-src 'self' data:; media-src 'self' blob: data:;",
       // Prevent MIME-sniffing
       'X-Content-Type-Options': 'nosniff',
       // Prevent Clickjacking / Framing

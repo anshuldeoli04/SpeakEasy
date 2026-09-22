@@ -15,12 +15,23 @@ const STORAGE_KEYS = {
 
 export const Storage = {
   getApiKey() {
-    return (localStorage.getItem(STORAGE_KEYS.API_KEY) || '').trim();
+    const raw = localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
+    return raw
+      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '')
+      .replace(/^["'`]|["'`]$/g, '')
+      .replace(/[\r\n\t]/g, '')
+      .trim();
   },
 
   setApiKey(key) {
     if (key) {
-      localStorage.setItem(STORAGE_KEYS.API_KEY, key.trim());
+      const sanitized = key
+        .toString()
+        .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '')
+        .replace(/^["'`]|["'`]$/g, '')
+        .replace(/[\r\n\t]/g, '')
+        .trim();
+      localStorage.setItem(STORAGE_KEYS.API_KEY, sanitized);
     } else {
       localStorage.removeItem(STORAGE_KEYS.API_KEY);
     }

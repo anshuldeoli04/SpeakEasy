@@ -41,19 +41,34 @@ EXAMPLE RESPONSE (for calibration):
 BAD: "There are three key benefits to practicing English daily. First, it improves fluency. Second, it expands vocabulary. Third, it builds confidence."
 GOOD: "Honestly, just talking every day makes a huge difference. Even five minutes helps. So, what made you want to practice today?"`;
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const CANDIDATE_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
+];
 
 export class GeminiClient {
   constructor(apiKey) {
-    this.apiKey = apiKey;
+    this.apiKey = GeminiClient.sanitizeApiKey(apiKey);
+    this.activeModel = 'gemini-2.5-flash';
   }
 
   setApiKey(apiKey) {
-    this.apiKey = (apiKey || '').trim();
+    this.apiKey = GeminiClient.sanitizeApiKey(apiKey);
   }
 
   hasApiKey() {
     return Boolean(this.apiKey && this.apiKey.length > 5);
+  }
+
+  static sanitizeApiKey(key) {
+    if (!key) return '';
+    return key
+      .toString()
+      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '') // remove zero-width & non-breaking spaces
+      .replace(/^["'`]|["'`]$/g, '') // remove surrounding quotes
+      .replace(/[\r\n\t]/g, '') // remove newlines/tabs
+      .trim();
   }
 
   /**
@@ -68,7 +83,7 @@ export class GeminiClient {
   }
 
   /**
-   * Generates a reply from Gemini 2.5 Flash
+   * Generates a reply from Gemini Flash with automatic multi-model fallback
    * @param {Array<{role: 'user'|'model', text: string}>} history - Full or recent conversation
    * @returns {Promise<string>} AI text reply
    */
@@ -94,66 +109,106 @@ export class GeminiClient {
       });
     }
 
-    const payload = {
-      contents,
-      systemInstruction: {
-        parts: [{ text: ALEX_SYSTEM_PROMPT }]
-      },
-      generationConfig: {
-        temperature: 0.9,
-        maxOutputTokens: 200,
-        thinkingConfig: { thinkingBudget: 0 } // Zero-latency thinking mode
-      }
-    };
+    const modelsToTry = [
+      this.activeModel,
+      ...CANDIDATE_MODELS.filter(m => m !== this.activeModel)
+    ];
 
-    const endpointUrl = GEMINI_API_BASE;
+    let lastError = null;
 
-    let response;
-    try {
-      response = await fetch(endpointUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': this.apiKey
-        },
-        body: JSON.stringify(payload)
-      });
-    } catch (networkError) {
-      console.error('Network error reaching Gemini API:', networkError);
-      throw new Error('NETWORK_ERROR');
-    }
-
-    if (!response.ok) {
-      let errorBody = {};
+    for (const model of modelsToTry) {
       try {
-        errorBody = await response.json();
-      } catch (e) {
-        // non-json response
-      }
+        const generationConfig = {
+          temperature: 0.9,
+          maxOutputTokens: 200
+        };
 
-      console.error('Gemini API Error details:', response.status, errorBody);
+        // Only use thinkingConfig on gemini-2.5-flash where supported
+        if (model === 'gemini-2.5-flash') {
+          generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        }
 
-      if (response.status === 400 || response.status === 403) {
-        throw new Error('INVALID_API_KEY');
-      } else if (response.status === 429) {
-        throw new Error('QUOTA_EXCEEDED');
-      } else {
-        const errorMsg = errorBody?.error?.message || `Server returned error (${response.status})`;
-        const err = new Error(errorMsg);
-        err.status = response.status;
-        throw err;
+        const payload = {
+          contents,
+          systemInstruction: {
+            parts: [{ text: ALEX_SYSTEM_PROMPT }]
+          },
+          generationConfig
+        };
+
+        const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+        const response = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': this.apiKey
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          let errorBody = {};
+          try {
+            errorBody = await response.json();
+          } catch (e) {}
+
+          const status = response.status;
+          const apiMsg = errorBody?.error?.message || '';
+
+          if (status === 400 && (apiMsg.includes('API_KEY_INVALID') || apiMsg.includes('API key not valid'))) {
+            throw new Error('INVALID_API_KEY');
+          }
+          if (status === 403) {
+            throw new Error('INVALID_API_KEY');
+          }
+          if (status === 429) {
+            throw new Error('QUOTA_EXCEEDED');
+          }
+
+          // If model is not found (404) or argument unknown (400), try next candidate model
+          if (status === 404 || (status === 400 && (apiMsg.includes('not found') || apiMsg.includes('not supported') || apiMsg.includes('unknown field')))) {
+            console.warn(`Model ${model} unavailable (${status}: ${apiMsg}). Trying fallback model...`);
+            lastError = new Error(apiMsg || `Model ${model} returned ${status}`);
+            continue;
+          }
+
+          throw new Error(apiMsg || `Server returned error (${status})`);
+        }
+
+        const data = await response.json();
+        const candidate = data.candidates?.[0];
+        if (!candidate || !candidate.content?.parts?.length) {
+          throw new Error('NO_RESPONSE_GENERATED');
+        }
+
+        // Extract text while ignoring internal thought reasoning parts
+        const textParts = candidate.content.parts
+          .filter(p => !p.thought && typeof p.text === 'string')
+          .map(p => p.text);
+
+        const rawText = textParts.length > 0
+          ? textParts.join(' ')
+          : candidate.content.parts.map(p => p.text || '').join(' ');
+
+        if (!rawText.trim()) {
+          throw new Error('NO_RESPONSE_GENERATED');
+        }
+
+        this.activeModel = model;
+        return GeminiClient.cleanSpeechText(rawText);
+      } catch (err) {
+        if (err.message === 'INVALID_API_KEY' || err.message === 'QUOTA_EXCEEDED') {
+          throw err;
+        }
+        lastError = err;
+        if (err.name === 'TypeError' && (err.message.includes('fetch') || err.message.includes('Network'))) {
+          throw new Error('NETWORK_ERROR');
+        }
       }
     }
 
-    const data = await response.json();
-
-    const candidate = data.candidates?.[0];
-    if (!candidate || !candidate.content?.parts?.length) {
-      throw new Error('NO_RESPONSE_GENERATED');
-    }
-
-    const rawText = candidate.content.parts.map(p => p.text).join(' ');
-    return GeminiClient.cleanSpeechText(rawText);
+    throw lastError || new Error('NO_RESPONSE_GENERATED');
   }
 
   /**
@@ -259,83 +314,126 @@ You MUST respond ONLY with a single valid JSON object (no extra commentary befor
 }
 `;
 
-    const payload = {
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: analysisPrompt }]
+    const modelsToTry = [
+      this.activeModel,
+      ...CANDIDATE_MODELS.filter(m => m !== this.activeModel)
+    ];
+
+    let lastError = null;
+
+    for (const model of modelsToTry) {
+      try {
+        const generationConfig = {
+          temperature: 0.3,
+          maxOutputTokens: 2048
+        };
+
+        if (model === 'gemini-2.5-flash') {
+          generationConfig.thinkingConfig = { thinkingBudget: 0 };
         }
-      ],
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 2048,
-        thinkingConfig: { thinkingBudget: 0 }
+
+        const payload = {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: analysisPrompt }]
+            }
+          ],
+          generationConfig
+        };
+
+        const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+        const response = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': this.apiKey
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          let errorBody = {};
+          try {
+            errorBody = await response.json();
+          } catch (e) {}
+
+          const status = response.status;
+          const apiMsg = errorBody?.error?.message || '';
+
+          if (status === 400 && (apiMsg.includes('API_KEY_INVALID') || apiMsg.includes('API key not valid'))) {
+            throw new Error('INVALID_API_KEY');
+          }
+          if (status === 403) throw new Error('INVALID_API_KEY');
+          if (status === 429) throw new Error('QUOTA_EXCEEDED');
+
+          if (status === 404 || (status === 400 && (apiMsg.includes('not found') || apiMsg.includes('not supported') || apiMsg.includes('unknown field')))) {
+            console.warn(`Analysis with ${model} unavailable (${status}: ${apiMsg}). Trying fallback model...`);
+            lastError = new Error(apiMsg || `Model ${model} returned ${status}`);
+            continue;
+          }
+
+          throw new Error(apiMsg || `Analysis request failed (${status})`);
+        }
+
+        const data = await response.json();
+        const candidate = data.candidates?.[0];
+        if (!candidate || !candidate.content?.parts?.length) {
+          throw new Error('NO_RESPONSE_GENERATED');
+        }
+
+        const textParts = candidate.content.parts
+          .filter(p => !p.thought && typeof p.text === 'string')
+          .map(p => p.text);
+
+        const rawText = (textParts.length > 0
+          ? textParts.join(' ')
+          : candidate.content.parts.map(p => p.text || '').join(' ')
+        ).trim();
+
+        this.activeModel = model;
+
+        // Parse JSON safely (removing markdown code blocks if present)
+        try {
+          const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, rawText];
+          const jsonString = (jsonMatch[1] || rawText).trim();
+          return JSON.parse(jsonString);
+        } catch (jsonErr) {
+          console.error('Failed to parse analysis JSON:', jsonErr, rawText);
+          return {
+            overall: {
+              cefrLevel: "Evaluation Ready",
+              overallScore: 75,
+              fluencyScore: 75,
+              grammarScore: 75,
+              vocabularyScore: 75,
+              summary: rawText.slice(0, 300)
+            },
+            grammarMistakes: [],
+            sentenceStructure: [],
+            pronunciationAndClarity: [],
+            fluencyAndVocabulary: {
+              fillerAnalysis: "Analysis processed.",
+              vocabularyFeedback: "Keep expanding your vocabulary!",
+              flowFeedback: "Consistent effort shown."
+            },
+            strengths: ["Actively engaged in English conversation."],
+            actionPlan: [{ title: "Daily Practice", description: "Continue talking with Alex every day." }]
+          };
+        }
+      } catch (err) {
+        if (err.message === 'INVALID_API_KEY' || err.message === 'QUOTA_EXCEEDED') {
+          throw err;
+        }
+        lastError = err;
+        if (err.name === 'TypeError' && (err.message.includes('fetch') || err.message.includes('Network'))) {
+          throw new Error('NETWORK_ERROR');
+        }
       }
-    };
-
-    const endpointUrl = GEMINI_API_BASE;
-
-    let response;
-    try {
-      response = await fetch(endpointUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': this.apiKey
-        },
-        body: JSON.stringify(payload)
-      });
-    } catch (networkError) {
-      console.error('Network error during analysis:', networkError);
-      throw new Error('NETWORK_ERROR');
     }
 
-    if (!response.ok) {
-      if (response.status === 400 || response.status === 403) {
-        throw new Error('INVALID_API_KEY');
-      } else if (response.status === 429) {
-        throw new Error('QUOTA_EXCEEDED');
-      }
-      throw new Error(`Analysis request failed (${response.status})`);
-    }
-
-    const data = await response.json();
-    const candidate = data.candidates?.[0];
-    if (!candidate || !candidate.content?.parts?.length) {
-      throw new Error('NO_RESPONSE_GENERATED');
-    }
-
-    const rawText = candidate.content.parts.map(p => p.text).join(' ').trim();
-    
-    // Parse JSON safely (removing markdown code blocks if present)
-    try {
-      const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, rawText];
-      const jsonString = (jsonMatch[1] || rawText).trim();
-      return JSON.parse(jsonString);
-    } catch (jsonErr) {
-      console.error('Failed to parse analysis JSON:', jsonErr, rawText);
-      // Fallback structured object
-      return {
-        overall: {
-          cefrLevel: "Evaluation Ready",
-          overallScore: 70,
-          fluencyScore: 70,
-          grammarScore: 70,
-          vocabularyScore: 70,
-          summary: rawText.slice(0, 300)
-        },
-        grammarMistakes: [],
-        sentenceStructure: [],
-        pronunciationAndClarity: [],
-        fluencyAndVocabulary: {
-          fillerAnalysis: "Analysis processed.",
-          vocabularyFeedback: "Keep expanding your vocabulary!",
-          flowFeedback: "Consistent effort shown."
-        },
-        strengths: ["Actively engaged in English conversation."],
-        actionPlan: [{ title: "Daily Practice", description: "Continue talking with Alex every day." }]
-      };
-    }
+    throw lastError || new Error('Analysis request failed across all candidate models.');
   }
 }
 

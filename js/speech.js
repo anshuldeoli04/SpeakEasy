@@ -82,10 +82,12 @@ export class SpeechService {
         switch (event.error) {
           case 'not-allowed':
           case 'service-not-allowed':
-            this.onError(
-              'MIC_PERMISSION_DENIED',
-              'Microphone access was denied. Please click the camera/lock icon in your browser address bar to allow microphone access.'
-            );
+            if (this.isUserInitiated) {
+              this.onError(
+                'MIC_PERMISSION_DENIED',
+                'Microphone access was denied. Please allow microphone access in your browser settings.'
+              );
+            }
             this.onStatusChange('idle');
             break;
           case 'no-speech':
@@ -155,8 +157,10 @@ export class SpeechService {
 
   /**
    * Start listening for user speech
+   * @param {boolean} isUserInitiated - True if triggered by direct user click
    */
-  startListening() {
+  startListening(isUserInitiated = true) {
+    this.isUserInitiated = isUserInitiated;
     if (!this.recognition) {
       this.onError('NOT_SUPPORTED', 'Speech recognition is not supported in this browser. Please use Chrome or Edge.');
       return false;

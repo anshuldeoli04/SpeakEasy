@@ -242,19 +242,23 @@ class SpeakEasyApp {
       this.toggleKeyVisibilityBtn.textContent = isPassword ? '🔒' : '👁️';
     });
 
-    // Save API key on change
-    this.apiKeyInput.addEventListener('input', () => {
-      const key = this.apiKeyInput.value.trim();
-      Storage.setApiKey(key);
-      this.gemini.setApiKey(key);
-      if (key) {
+    // Save API key on change & paste (with robust sanitization for mobile copy-paste)
+    const handleKeyUpdate = () => {
+      const sanitized = GeminiClient.sanitizeApiKey(this.apiKeyInput.value);
+      this.apiKeyInput.value = sanitized;
+      Storage.setApiKey(sanitized);
+      this.gemini.setApiKey(sanitized);
+      if (sanitized) {
         this.apiKeyBanner.classList.add('hidden');
         this.apiKeySavedIndicator.classList.remove('hidden');
         setTimeout(() => this.apiKeySavedIndicator.classList.add('hidden'), 2000);
       } else {
         this.apiKeyBanner.classList.remove('hidden');
       }
-    });
+    };
+
+    this.apiKeyInput.addEventListener('input', handleKeyUpdate);
+    this.apiKeyInput.addEventListener('paste', () => setTimeout(handleKeyUpdate, 0));
 
     // Voice Selection
     this.voiceSelect.addEventListener('change', () => {
@@ -388,8 +392,9 @@ class SpeakEasyApp {
 
   closeSettings() {
     this.settingsModal.classList.add('hidden');
-    // Save API key
-    const key = this.apiKeyInput.value.trim();
+    // Save API key with sanitization
+    const key = GeminiClient.sanitizeApiKey(this.apiKeyInput.value);
+    this.apiKeyInput.value = key;
     Storage.setApiKey(key);
     this.gemini.setApiKey(key);
     if (key) {
@@ -601,7 +606,7 @@ class SpeakEasyApp {
           setTimeout(() => {
             // Only start if not already listening or speaking
             if (this.status === 'idle') {
-              this.speech.startListening();
+              this.speech.startListening(false);
             }
           }, 350);
         }
@@ -675,21 +680,29 @@ class SpeakEasyApp {
     row.className = 'message-row error-row';
 
     let errorText = 'Oops! Something went wrong connecting to Alex.';
-    if (error.message === 'INVALID_API_KEY') {
-      errorText = 'Invalid Gemini API key. Please check your key in Settings.';
-    } else if (error.message === 'QUOTA_EXCEEDED') {
-      errorText = 'Gemini API quota exceeded for this key. Please check your Google AI Studio plan.';
-    } else if (error.message === 'NETWORK_ERROR') {
-      errorText = 'Network connection problem. Please check your internet.';
-    } else if (error.message === 'API_KEY_MISSING') {
-      errorText = 'Gemini API key is missing. Please add it in Settings.';
+    const rawMsg = (error && error.message) ? String(error.message) : '';
+
+    if (rawMsg === 'INVALID_API_KEY' || rawMsg.includes('API_KEY_INVALID') || rawMsg.includes('API key not valid')) {
+      errorText = 'Invalid Gemini API key. Please check or re-paste your key in Settings.';
+    } else if (rawMsg === 'QUOTA_EXCEEDED' || rawMsg.includes('RESOURCE_EXHAUSTED')) {
+      errorText = 'Gemini API quota exceeded for this key. Please check your Google AI Studio quota.';
+    } else if (rawMsg === 'NETWORK_ERROR' || rawMsg.includes('Failed to fetch') || rawMsg.includes('NetworkError')) {
+      errorText = 'Network connection problem. Please check your internet connection.';
+    } else if (rawMsg === 'API_KEY_MISSING') {
+      errorText = 'Gemini API key is missing. Please tap Settings to add your key.';
+    } else if (rawMsg === 'NO_RESPONSE_GENERATED') {
+      errorText = 'Alex could not generate a response. Please tap the mic and try again.';
+    } else if (rawMsg.includes('User location is not supported')) {
+      errorText = 'Google Gemini API is not supported in your current mobile network location or VPN.';
+    } else if (rawMsg.length > 0 && !rawMsg.startsWith('[object')) {
+      errorText = `Could not connect to Alex: ${rawMsg}`;
     }
 
     const bubble = document.createElement('div');
     bubble.className = 'error-bubble';
     bubble.innerHTML = `<span>⚠️ ${errorText}</span>`;
 
-    if (retryCallback && error.message !== 'API_KEY_MISSING') {
+    if (retryCallback && rawMsg !== 'API_KEY_MISSING') {
       const retryBtn = document.createElement('button');
       retryBtn.className = 'retry-action-btn';
       retryBtn.textContent = 'Retry';
