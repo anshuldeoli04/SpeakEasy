@@ -20,6 +20,8 @@ export class SpeechService {
     this.currentUtterance = null;
     this.shouldAutoRestart = false;
     this.finalTranscript = '';
+    this.latestTranscript = '';
+    this.silenceTimer = null;
 
     this._initSpeechRecognition();
     this._initSpeechSynthesis();
@@ -56,6 +58,11 @@ export class SpeechService {
       this.recognition.onstart = () => {
         this.isListening = true;
         this.finalTranscript = '';
+        this.latestTranscript = '';
+        if (this.silenceTimer) {
+          clearTimeout(this.silenceTimer);
+          this.silenceTimer = null;
+        }
         this.onStatusChange('listening');
       };
 
@@ -70,12 +77,33 @@ export class SpeechService {
           }
         }
 
+        this.latestTranscript = (this.finalTranscript + ' ' + interim).trim();
+
         if (interim) {
           this.onInterimResult(interim);
+        }
+
+        // Fast endpointing: if user spoke something and is silent for 950ms, stop recognition immediately
+        if (this.silenceTimer) {
+          clearTimeout(this.silenceTimer);
+          this.silenceTimer = null;
+        }
+
+        if (this.latestTranscript.length > 0) {
+          this.silenceTimer = setTimeout(() => {
+            if (this.isListening) {
+              console.log('[SpeakEasy] Auto-finalizing speech turn after 950ms silence');
+              this.stopListening();
+            }
+          }, 950);
         }
       };
 
       this.recognition.onerror = (event) => {
+        if (this.silenceTimer) {
+          clearTimeout(this.silenceTimer);
+          this.silenceTimer = null;
+        }
         console.warn('SpeechRecognition error:', event.error);
         this.isListening = false;
 
@@ -111,11 +139,16 @@ export class SpeechService {
       };
 
       this.recognition.onend = () => {
+        if (this.silenceTimer) {
+          clearTimeout(this.silenceTimer);
+          this.silenceTimer = null;
+        }
         const wasListening = this.isListening;
         this.isListening = false;
 
-        const recognizedText = this.finalTranscript.trim();
+        const recognizedText = (this.finalTranscript || this.latestTranscript || '').trim();
         this.finalTranscript = '';
+        this.latestTranscript = '';
 
         if (recognizedText) {
           this.onSpeechResult(recognizedText);
@@ -191,19 +224,26 @@ export class SpeechService {
    * Stop listening
    */
   stopListening() {
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
     if (!this.recognition || !this.isListening) return;
     try {
       this.recognition.stop();
     } catch (e) {
       console.warn('Error stopping recognition:', e);
     }
-    this.isListening = false;
   }
 
   /**
    * Abort listening immediately without processing final results
    */
   abortListening() {
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
     if (!this.recognition) return;
     try {
       this.recognition.abort();
@@ -212,6 +252,7 @@ export class SpeechService {
     }
     this.isListening = false;
     this.finalTranscript = '';
+    this.latestTranscript = '';
     this.onStatusChange('idle');
   }
 

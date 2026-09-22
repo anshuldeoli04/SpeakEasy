@@ -8,7 +8,7 @@ export const ALEX_SYSTEM_PROMPT = `You are "Alex," a warm, patient, and encourag
 VOICE OUTPUT RULES (CRITICAL — FOLLOW STRICTLY):
 1. NO LISTS. Never use numbered lists, bullet points, or "first, second, third" structures. Speak in natural flowing sentences.
 2. NO MARKDOWN. Do not use asterisks, bold, headers, or any formatting. Your output goes directly to a text-to-speech engine.
-3. LENGTH LIMIT: Keep every response to 1–3 short sentences maximum, unless the user explicitly asks you to explain something in detail.
+3. SPEED & BREVITY (CRITICAL): Keep every response to 1–2 short, punchy sentences (maximum 20-25 words total). Answer immediately with casual conversational phrasing. Do not over-elaborate.
 4. USE NATURAL FILLERS sparingly: "Hmm," "Well," "You know," "Actually," "I see." These make you sound human, not robotic.
 5. ALWAYS END WITH A QUESTION to pass the turn back to the user. Never monologue. The goal is to keep them talking.
 6. SPEAK LIKE YOU'RE THINKING, not reading. Use contractions (I'm, don't, that's). Break sentences. Use short clauses.
@@ -42,17 +42,18 @@ BAD: "There are three key benefits to practicing English daily. First, it improv
 GOOD: "Honestly, just talking every day makes a huge difference. Even five minutes helps. So, what made you want to practice today?"`;
 
 const CANDIDATE_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash',
-  'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
+  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-3.5-flash',
+  'gemini-3.8-flash',
   'gemini-1.5-flash'
 ];
 
 export class GeminiClient {
   constructor(apiKey) {
     this.apiKey = GeminiClient.sanitizeApiKey(apiKey);
-    this.activeModel = 'gemini-3.8-flash';
+    this.activeModel = 'gemini-2.5-flash-lite';
     this.discoveredModels = null;
     this.discoveryPromise = null;
   }
@@ -63,7 +64,7 @@ export class GeminiClient {
       this.apiKey = sanitized;
       this.discoveredModels = null;
       this.discoveryPromise = null;
-      this.activeModel = 'gemini-3.8-flash';
+      this.activeModel = 'gemini-2.5-flash-lite';
     }
   }
 
@@ -127,16 +128,17 @@ export class GeminiClient {
               .filter(name => Boolean(name));
 
             if (supported.length > 0) {
-              // Prioritize low-latency Flash models and newer versions
+              // Prioritize low-latency Flash-Lite models and zero-thinking models
               const scoreModel = (name) => {
                 let score = 0;
                 if (name.includes('flash')) score += 100;
-                if (name.includes('3.8')) score += 50;
-                else if (name.includes('3.5')) score += 40;
-                else if (name.includes('2.5')) score += 30;
-                else if (name.includes('2.0')) score += 20;
-                else if (name.includes('1.5')) score += 10;
-                if (name.includes('lite')) score -= 2;
+                // Prioritize ultra-low latency Flash-Lite models (<0.3s)
+                if (name.includes('lite')) score += 60;
+                if (name.includes('2.5')) score += 40; // 2.5 supports thinkingBudget: 0 (zero reasoning lag)
+                else if (name.includes('3.5')) score += 30;
+                else if (name.includes('3.8')) score += 10;
+                else if (name.includes('2.0')) score += 5;
+                else if (name.includes('1.5')) score += 1;
                 return score;
               };
 
@@ -171,15 +173,16 @@ export class GeminiClient {
    */
   static buildGenerationConfig(model, isAnalysis = false, omitThinking = false) {
     const config = {
-      temperature: isAnalysis ? 0.3 : 0.9,
-      maxOutputTokens: isAnalysis ? 2048 : 800
+      temperature: isAnalysis ? 0.3 : 0.7,
+      maxOutputTokens: isAnalysis ? 2048 : 120
     };
 
     if (!omitThinking) {
-      if (model.includes('3.8') || model.includes('3.5')) {
-        config.thinkingConfig = { thinkingLevel: 'LOW' };
-      } else if (model.includes('2.5')) {
+      if (model.includes('2.5')) {
+        // Zero thinking budget completely turns off reasoning tokens for immediate voice output
         config.thinkingConfig = { thinkingBudget: 0 };
+      } else if (model.includes('3.8') || model.includes('3.5')) {
+        config.thinkingConfig = { thinkingLevel: 'LOW' };
       }
     }
 
@@ -269,11 +272,107 @@ export class GeminiClient {
   }
 
   /**
-   * Generates a reply from Gemini Flash with automatic multi-model fallback
+   * Helper to make streaming generateContent request using SSE.
+   * @param {string} model - Model name
+   * @param {Object} payloadBase - Payload without generationConfig
+   * @param {Function} onChunk - Real-time accumulated text callback
+   * @returns {Promise<string>} Cleaned text reply
+   */
+  async _callStreamGenerateContent(model, payloadBase, onChunk) {
+    const genConfig = GeminiClient.buildGenerationConfig(model, false, false);
+    const payload = {
+      ...payloadBase,
+      generationConfig: genConfig
+    };
+
+    const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
+    const response = await fetch(endpointUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': this.apiKey
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      let errorBody = {};
+      try { errorBody = await response.json(); } catch (e) {}
+      const status = response.status;
+      const apiMsg = errorBody?.error?.message || '';
+
+      if (status === 400 && (apiMsg.includes('API_KEY_INVALID') || apiMsg.includes('API key not valid'))) {
+        throw new Error('INVALID_API_KEY');
+      }
+      if (status === 403) throw new Error('INVALID_API_KEY');
+      if (status === 429) throw new Error('QUOTA_EXCEEDED');
+
+      const err = new Error(apiMsg || `Stream request failed (${status})`);
+      err.status = status;
+      if (status === 404 || (status === 400 && (apiMsg.includes('not found') || apiMsg.includes('not supported')))) {
+        err.isModelUnavailable = true;
+      }
+      throw err;
+    }
+
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      throw new Error('STREAMING_NOT_SUPPORTED');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let accumulatedText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data:')) {
+          const jsonStr = trimmed.slice(5).trim();
+          if (!jsonStr || jsonStr === '[DONE]') continue;
+          try {
+            const data = JSON.parse(jsonStr);
+            const candidate = data.candidates?.[0];
+            if (candidate?.content?.parts) {
+              const textParts = candidate.content.parts
+                .filter(p => !p.thought && typeof p.text === 'string')
+                .map(p => p.text)
+                .join('');
+              if (textParts) {
+                accumulatedText += textParts;
+                if (onChunk && typeof onChunk === 'function') {
+                  onChunk(GeminiClient.cleanSpeechText(accumulatedText));
+                }
+              }
+            }
+          } catch (e) {
+            // Partial JSON chunk ignored
+          }
+        }
+      }
+    }
+
+    if (!accumulatedText.trim()) {
+      throw new Error('NO_RESPONSE_GENERATED');
+    }
+
+    return GeminiClient.cleanSpeechText(accumulatedText);
+  }
+
+  /**
+   * Generates a reply from Gemini Flash with automatic multi-model fallback and streaming
    * @param {Array<{role: 'user'|'model', text: string}>} history - Full or recent conversation
+   * @param {Function} onChunk - Optional streaming chunk callback
    * @returns {Promise<string>} AI text reply
    */
-  async generateReply(history = []) {
+  async generateReply(history = [], onChunk = null) {
     if (!this.hasApiKey()) {
       throw new Error('API_KEY_MISSING');
     }
@@ -312,6 +411,23 @@ export class GeminiClient {
           }
         };
 
+        // If streaming callback provided, attempt fast SSE stream first
+        if (onChunk && typeof onChunk === 'function') {
+          try {
+            const streamedText = await this._callStreamGenerateContent(model, payloadBase, onChunk);
+            this.activeModel = model;
+            return streamedText;
+          } catch (streamErr) {
+            if (streamErr.message === 'INVALID_API_KEY' || streamErr.message === 'QUOTA_EXCEEDED') {
+              throw streamErr;
+            }
+            if (streamErr.isModelUnavailable) {
+              throw streamErr;
+            }
+            console.warn(`[SpeakEasy] Streaming with ${model} failed, falling back to standard generation:`, streamErr);
+          }
+        }
+
         const data = await this._callGenerateContent(model, payloadBase, false);
 
         const candidate = data.candidates?.[0];
@@ -333,7 +449,11 @@ export class GeminiClient {
         }
 
         this.activeModel = model;
-        return GeminiClient.cleanSpeechText(rawText);
+        const cleaned = GeminiClient.cleanSpeechText(rawText);
+        if (onChunk && typeof onChunk === 'function') {
+          onChunk(cleaned);
+        }
+        return cleaned;
       } catch (err) {
         if (err.message === 'INVALID_API_KEY' || err.message === 'QUOTA_EXCEEDED') {
           throw err;

@@ -579,22 +579,43 @@ class SpeakEasyApp {
     // 2. Set status to "Thinking..."
     this.handleStatusChange('thinking');
 
-    // 3. Call Gemini 2.5 Flash API
+    // Prepare AI reply placeholder for streaming
+    const aiMessage = {
+      id: Date.now() + 1,
+      role: 'model',
+      text: '',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    let bubbleRefs = null;
+
+    // 3. Call Gemini Flash API with streaming
     try {
-      const aiReplyText = await this.gemini.generateReply(this.messages);
+      const aiReplyText = await this.gemini.generateReply(this.messages, (chunkText) => {
+        if (!bubbleRefs) {
+          this.messages.push(aiMessage);
+          bubbleRefs = this.renderMessageBubble(aiMessage);
+        }
+        aiMessage.text = chunkText;
+        if (bubbleRefs?.content) {
+          bubbleRefs.content.textContent = chunkText;
+        }
+        this.scrollToBottom();
+      });
+
+      if (!bubbleRefs) {
+        aiMessage.text = aiReplyText;
+        this.messages.push(aiMessage);
+        bubbleRefs = this.renderMessageBubble(aiMessage);
+      } else {
+        aiMessage.text = aiReplyText;
+        if (bubbleRefs?.content) {
+          bubbleRefs.content.textContent = aiReplyText;
+        }
+      }
 
       // Record AI turn in tracker
       this.tracker.recordAiTurn(aiReplyText);
-
-      // 4. Add and render AI reply
-      const aiMessage = {
-        id: Date.now() + 1,
-        role: 'model',
-        text: aiReplyText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      this.messages.push(aiMessage);
-      this.renderMessageBubble(aiMessage);
       this.scrollToBottom(true);
       Storage.saveConversation(this.messages);
 
@@ -613,6 +634,11 @@ class SpeakEasyApp {
       });
     } catch (err) {
       console.error('Error in conversation turn:', err);
+      if (bubbleRefs && !aiMessage.text.trim()) {
+        bubbleRefs.row.remove();
+        const idx = this.messages.indexOf(aiMessage);
+        if (idx !== -1) this.messages.splice(idx, 1);
+      }
       this.handleStatusChange('idle');
       this.renderErrorBubble(err, () => this.processUserUtterance(userText));
     }
@@ -673,6 +699,7 @@ class SpeakEasyApp {
     row.appendChild(bubble);
 
     this.transcriptContainer.appendChild(row);
+    return { row, bubble, content };
   }
 
   renderErrorBubble(error, retryCallback) {
