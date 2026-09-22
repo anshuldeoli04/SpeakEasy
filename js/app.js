@@ -694,6 +694,8 @@ class SpeakEasyApp {
       errorText = 'Alex could not generate a response. Please tap the mic and try again.';
     } else if (rawMsg.includes('User location is not supported')) {
       errorText = 'Google Gemini API is not supported in your current mobile network location or VPN.';
+    } else if (rawMsg.includes('not found') || rawMsg.includes('ListModels') || rawMsg.includes('not supported for generateContent')) {
+      errorText = 'The AI model is currently unavailable for this API key. Please check your key in Settings or try again.';
     } else if (rawMsg.length > 0 && !rawMsg.startsWith('[object')) {
       errorText = `Could not connect to Alex: ${rawMsg}`;
     }

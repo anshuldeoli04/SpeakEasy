@@ -42,19 +42,29 @@ BAD: "There are three key benefits to practicing English daily. First, it improv
 GOOD: "Honestly, just talking every day makes a huge difference. Even five minutes helps. So, what made you want to practice today?"`;
 
 const CANDIDATE_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
   'gemini-2.5-flash',
-  'gemini-2.0-flash',
+  'gemini-2.5-flash-lite',
   'gemini-1.5-flash'
 ];
 
 export class GeminiClient {
   constructor(apiKey) {
     this.apiKey = GeminiClient.sanitizeApiKey(apiKey);
-    this.activeModel = 'gemini-2.5-flash';
+    this.activeModel = 'gemini-3.8-flash';
+    this.discoveredModels = null;
+    this.discoveryPromise = null;
   }
 
   setApiKey(apiKey) {
-    this.apiKey = GeminiClient.sanitizeApiKey(apiKey);
+    const sanitized = GeminiClient.sanitizeApiKey(apiKey);
+    if (sanitized !== this.apiKey) {
+      this.apiKey = sanitized;
+      this.discoveredModels = null;
+      this.discoveryPromise = null;
+      this.activeModel = 'gemini-3.8-flash';
+    }
   }
 
   hasApiKey() {
@@ -66,8 +76,8 @@ export class GeminiClient {
     return key
       .toString()
       .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '') // remove zero-width & non-breaking spaces
-      .replace(/^["'`]|["'`]$/g, '') // remove surrounding quotes
-      .replace(/[\r\n\t]/g, '') // remove newlines/tabs
+      .trim()
+      .replace(/^["'`]+|["'`]+$/g, '') // remove surrounding quotes
       .trim();
   }
 
@@ -80,6 +90,182 @@ export class GeminiClient {
       .replace(/[*_~`#>-]/g, '') // remove markdown symbols
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  /**
+   * Dynamically queries ModelService.ListModels to discover which models this API key
+   * is authorized to use, prioritizing low-latency Flash models.
+   * @returns {Promise<string[]>} List of available model identifiers
+   */
+  async getAvailableModels() {
+    if (this.discoveredModels && this.discoveredModels.length > 0) {
+      return this.discoveredModels;
+    }
+
+    if (this.discoveryPromise) {
+      return this.discoveryPromise;
+    }
+
+    this.discoveryPromise = (async () => {
+      try {
+        const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(this.apiKey)}`;
+        const response = await fetch(listUrl, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': this.apiKey
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data?.models)) {
+            // Keep models that explicitly support generateContent
+            const supported = data.models
+              .filter(m => Array.isArray(m.supportedMethods) && m.supportedMethods.includes('generateContent'))
+              .map(m => (m.name || '').replace(/^models\//, ''))
+              .filter(name => Boolean(name));
+
+            if (supported.length > 0) {
+              // Prioritize low-latency Flash models and newer versions
+              const scoreModel = (name) => {
+                let score = 0;
+                if (name.includes('flash')) score += 100;
+                if (name.includes('3.8')) score += 50;
+                else if (name.includes('3.5')) score += 40;
+                else if (name.includes('2.5')) score += 30;
+                else if (name.includes('2.0')) score += 20;
+                else if (name.includes('1.5')) score += 10;
+                if (name.includes('lite')) score -= 2;
+                return score;
+              };
+
+              supported.sort((a, b) => scoreModel(b) - scoreModel(a));
+              this.discoveredModels = supported;
+              if (!supported.includes(this.activeModel)) {
+                this.activeModel = supported[0];
+              }
+              console.log(`[SpeakEasy] Discovered ${supported.length} available models. Primary: ${this.activeModel}`);
+              return this.discoveredModels;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[SpeakEasy] Model discovery via ListModels failed, using fallback candidate list:', err);
+      } finally {
+        this.discoveryPromise = null;
+      }
+
+      return CANDIDATE_MODELS;
+    })();
+
+    return this.discoveryPromise;
+  }
+
+  /**
+   * Builds an appropriate generationConfig object based on model version capabilities.
+   * @param {string} model - Model identifier
+   * @param {boolean} isAnalysis - True for session feedback analysis
+   * @param {boolean} omitThinking - True to skip thinkingConfig (e.g. for fallback retry)
+   * @returns {Object}
+   */
+  static buildGenerationConfig(model, isAnalysis = false, omitThinking = false) {
+    const config = {
+      temperature: isAnalysis ? 0.3 : 0.9,
+      maxOutputTokens: isAnalysis ? 2048 : 800
+    };
+
+    if (!omitThinking) {
+      if (model.includes('3.8') || model.includes('3.5')) {
+        config.thinkingConfig = { thinkingLevel: 'LOW' };
+      } else if (model.includes('2.5')) {
+        config.thinkingConfig = { thinkingBudget: 0 };
+      }
+    }
+
+    return config;
+  }
+
+  /**
+   * Helper to make generateContent request with automatic thinkingConfig retry if needed.
+   * @param {string} model - Model name
+   * @param {Object} payloadBase - Payload without generationConfig
+   * @param {boolean} isAnalysis - True if analysis request
+   * @returns {Promise<Object>} API response JSON
+   */
+  async _callGenerateContent(model, payloadBase, isAnalysis = false) {
+    const configsToTry = [
+      GeminiClient.buildGenerationConfig(model, isAnalysis, false)
+    ];
+    // If thinkingConfig is present, add fallback without thinkingConfig
+    if (configsToTry[0].thinkingConfig) {
+      configsToTry.push(GeminiClient.buildGenerationConfig(model, isAnalysis, true));
+    }
+
+    let lastRes = null;
+    let lastErrBody = null;
+
+    for (const genConfig of configsToTry) {
+      const payload = {
+        ...payloadBase,
+        generationConfig: genConfig
+      };
+
+      const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const response = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        return await response.json();
+      }
+
+      let errorBody = {};
+      try {
+        errorBody = await response.json();
+      } catch (e) {}
+
+      lastRes = response;
+      lastErrBody = errorBody;
+
+      const status = response.status;
+      const apiMsg = errorBody?.error?.message || '';
+
+      if (status === 400 && (apiMsg.includes('API_KEY_INVALID') || apiMsg.includes('API key not valid'))) {
+        throw new Error('INVALID_API_KEY');
+      }
+      if (status === 403) {
+        throw new Error('INVALID_API_KEY');
+      }
+      if (status === 429) {
+        throw new Error('QUOTA_EXCEEDED');
+      }
+
+      // If error is about thinkingConfig or unknown field, retry without thinkingConfig
+      if (status === 400 && (apiMsg.includes('thinking') || apiMsg.includes('unknown field') || apiMsg.includes('Invalid JSON payload'))) {
+        console.warn(`Model ${model} rejected thinkingConfig (${apiMsg}). Retrying without thinkingConfig...`);
+        continue;
+      }
+
+      break;
+    }
+
+    const status = lastRes ? lastRes.status : 500;
+    const apiMsg = lastErrBody?.error?.message || `Server returned error (${status})`;
+
+    if (status === 404 || (status === 400 && (apiMsg.includes('not found') || apiMsg.includes('not supported')))) {
+      const err = new Error(apiMsg);
+      err.status = status;
+      err.isModelUnavailable = true;
+      throw err;
+    }
+
+    throw new Error(apiMsg);
   }
 
   /**
@@ -109,74 +295,25 @@ export class GeminiClient {
       });
     }
 
+    const availableModels = await this.getAvailableModels();
     const modelsToTry = [
       this.activeModel,
-      ...CANDIDATE_MODELS.filter(m => m !== this.activeModel)
+      ...availableModels.filter(m => m !== this.activeModel)
     ];
 
     let lastError = null;
 
     for (const model of modelsToTry) {
       try {
-        const generationConfig = {
-          temperature: 0.9,
-          maxOutputTokens: 200
-        };
-
-        // Only use thinkingConfig on gemini-2.5-flash where supported
-        if (model === 'gemini-2.5-flash') {
-          generationConfig.thinkingConfig = { thinkingBudget: 0 };
-        }
-
-        const payload = {
+        const payloadBase = {
           contents,
           systemInstruction: {
             parts: [{ text: ALEX_SYSTEM_PROMPT }]
-          },
-          generationConfig
+          }
         };
 
-        const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+        const data = await this._callGenerateContent(model, payloadBase, false);
 
-        const response = await fetch(endpointUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': this.apiKey
-          },
-          body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-          let errorBody = {};
-          try {
-            errorBody = await response.json();
-          } catch (e) {}
-
-          const status = response.status;
-          const apiMsg = errorBody?.error?.message || '';
-
-          if (status === 400 && (apiMsg.includes('API_KEY_INVALID') || apiMsg.includes('API key not valid'))) {
-            throw new Error('INVALID_API_KEY');
-          }
-          if (status === 403) {
-            throw new Error('INVALID_API_KEY');
-          }
-          if (status === 429) {
-            throw new Error('QUOTA_EXCEEDED');
-          }
-
-          // If model is not found (404) or argument unknown (400), try next candidate model
-          if (status === 404 || (status === 400 && (apiMsg.includes('not found') || apiMsg.includes('not supported') || apiMsg.includes('unknown field')))) {
-            console.warn(`Model ${model} unavailable (${status}: ${apiMsg}). Trying fallback model...`);
-            lastError = new Error(apiMsg || `Model ${model} returned ${status}`);
-            continue;
-          }
-
-          throw new Error(apiMsg || `Server returned error (${status})`);
-        }
-
-        const data = await response.json();
         const candidate = data.candidates?.[0];
         if (!candidate || !candidate.content?.parts?.length) {
           throw new Error('NO_RESPONSE_GENERATED');
@@ -201,10 +338,15 @@ export class GeminiClient {
         if (err.message === 'INVALID_API_KEY' || err.message === 'QUOTA_EXCEEDED') {
           throw err;
         }
-        lastError = err;
         if (err.name === 'TypeError' && (err.message.includes('fetch') || err.message.includes('Network'))) {
           throw new Error('NETWORK_ERROR');
         }
+        if (err.isModelUnavailable || (err.message && (err.message.includes('not found') || err.message.includes('not supported')))) {
+          console.warn(`Model ${model} unavailable (${err.message}). Trying fallback model...`);
+          lastError = err;
+          continue;
+        }
+        lastError = err;
       }
     }
 
@@ -314,70 +456,27 @@ You MUST respond ONLY with a single valid JSON object (no extra commentary befor
 }
 `;
 
+    const availableModels = await this.getAvailableModels();
     const modelsToTry = [
       this.activeModel,
-      ...CANDIDATE_MODELS.filter(m => m !== this.activeModel)
+      ...availableModels.filter(m => m !== this.activeModel)
     ];
 
     let lastError = null;
 
     for (const model of modelsToTry) {
       try {
-        const generationConfig = {
-          temperature: 0.3,
-          maxOutputTokens: 2048
-        };
-
-        if (model === 'gemini-2.5-flash') {
-          generationConfig.thinkingConfig = { thinkingBudget: 0 };
-        }
-
-        const payload = {
+        const payloadBase = {
           contents: [
             {
               role: 'user',
               parts: [{ text: analysisPrompt }]
             }
-          ],
-          generationConfig
+          ]
         };
 
-        const endpointUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+        const data = await this._callGenerateContent(model, payloadBase, true);
 
-        const response = await fetch(endpointUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': this.apiKey
-          },
-          body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-          let errorBody = {};
-          try {
-            errorBody = await response.json();
-          } catch (e) {}
-
-          const status = response.status;
-          const apiMsg = errorBody?.error?.message || '';
-
-          if (status === 400 && (apiMsg.includes('API_KEY_INVALID') || apiMsg.includes('API key not valid'))) {
-            throw new Error('INVALID_API_KEY');
-          }
-          if (status === 403) throw new Error('INVALID_API_KEY');
-          if (status === 429) throw new Error('QUOTA_EXCEEDED');
-
-          if (status === 404 || (status === 400 && (apiMsg.includes('not found') || apiMsg.includes('not supported') || apiMsg.includes('unknown field')))) {
-            console.warn(`Analysis with ${model} unavailable (${status}: ${apiMsg}). Trying fallback model...`);
-            lastError = new Error(apiMsg || `Model ${model} returned ${status}`);
-            continue;
-          }
-
-          throw new Error(apiMsg || `Analysis request failed (${status})`);
-        }
-
-        const data = await response.json();
         const candidate = data.candidates?.[0];
         if (!candidate || !candidate.content?.parts?.length) {
           throw new Error('NO_RESPONSE_GENERATED');
@@ -426,10 +525,15 @@ You MUST respond ONLY with a single valid JSON object (no extra commentary befor
         if (err.message === 'INVALID_API_KEY' || err.message === 'QUOTA_EXCEEDED') {
           throw err;
         }
-        lastError = err;
         if (err.name === 'TypeError' && (err.message.includes('fetch') || err.message.includes('Network'))) {
           throw new Error('NETWORK_ERROR');
         }
+        if (err.isModelUnavailable || (err.message && (err.message.includes('not found') || err.message.includes('not supported')))) {
+          console.warn(`Analysis with ${model} unavailable (${err.message}). Trying fallback model...`);
+          lastError = err;
+          continue;
+        }
+        lastError = err;
       }
     }
 
